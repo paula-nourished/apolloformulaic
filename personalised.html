@@ -82,6 +82,24 @@ summary:focus-visible,button:focus-visible,input:focus-visible,select:focus-visi
 .foot{max-width:1320px;margin:16px auto 0;font-size:11.5px;color:var(--muted)}
 .btnrow{display:flex;gap:8px;margin-top:8px}
 .btnrow button{font:600 12px var(--sans);border:1px solid var(--rule);background:var(--panel);color:var(--navy);border-radius:6px;padding:6px 10px;cursor:pointer}
+.layer{grid-template-columns:minmax(0,1fr) auto auto}
+.layer.doc{background:var(--sheet);color:var(--navy);border:2px solid var(--navy)}
+.layer .rm{font:600 11px var(--sans);border:1px solid currentColor;background:transparent;color:inherit;border-radius:999px;padding:3px 9px;cursor:pointer;opacity:.85}
+.layer .rm:hover{opacity:1}
+.key i.dockey{background:var(--sheet);border:2px solid var(--navy);box-sizing:border-box}
+.docbox{border:1px solid var(--rule);border-radius:8px;padding:12px}
+.docbox .hint{margin:0 0 10px;font-size:12.5px}
+.addrow{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+.docbox select,.docbox input[type=text]{font:500 13px var(--sans);padding:7px 8px;border:1px solid var(--rule);border-radius:6px;background:var(--panel);color:var(--navy);min-width:0}
+.docbox select#doc-active{flex:1 1 220px}
+.docbox input[type=text]{width:100%}
+.docbox .warn{margin:8px 0 0;font-size:12.5px;color:var(--warn);font-weight:600}
+.btnrow button.primary{background:var(--navy);color:var(--sheet);border-color:var(--navy)}
+.btnrow button:disabled{opacity:.45;cursor:not-allowed}
+.changes{list-style:none;padding:0!important;margin:10px 0 0!important}
+.changes li{display:flex;justify-content:space-between;gap:10px;align-items:baseline;border-top:1px dashed var(--rule);padding-top:6px;color:var(--navy)}
+.changes li.note{color:var(--warn)}
+button.link{font:600 12px var(--sans);background:none;border:0;color:var(--accent-ink);cursor:pointer;padding:0;white-space:nowrap}
 @media (prefers-reduced-motion:no-preference){.layer{transition:background .25s}}
 .mode{display:inline-flex;border:1px solid var(--rule);border-radius:999px;background:var(--sheet);padding:3px;margin:2px 0 14px;gap:2px;flex-wrap:wrap}
 .mode button{font:700 13px var(--sans);border:0;background:none;color:var(--ink);border-radius:999px;padding:8px 16px;cursor:pointer}
@@ -176,7 +194,7 @@ table.sh-nt{width:100%;border-collapse:collapse;font-size:5.8pt;margin:0}
 <div class="top"><span class="eyebrow">Personalised engine · prototype · Matrix v5 rules · ready-made stacks</span><span class="marker">NOURISHED × APOLLO</span></div>
 <div class="wrap">
   <h1>Pick a patient, and watch the stack build</h1>
-  <p class="stand">Change any blood result or answer and the seven layers rebuild at once. Navy layers come from the bloods. Orange layers come from the questionnaire.</p>
+  <p class="stand">Change any blood result or answer and the seven layers rebuild at once. Navy layers come from the bloods. Orange layers come from the questionnaire. The doctor can remove any layer or add their own, and the rest rebuilds around their choice.</p>
   <div class="mode" role="group" aria-label="How to build the stack"><button type="button" id="m-build" aria-pressed="true">Build from the patient</button><button type="button" id="m-ready" aria-pressed="false">One click: ready-made stack</button></div>
   <div class="ready" id="ready" hidden></div>
   <div class="patients" id="patients" role="group" aria-label="Choose a patient"></div>
@@ -274,16 +292,23 @@ function makeEngine(DATA) {
     if (L.b12 === "high") ex("Vitamin B12", "b12_high");
     if (L.siron === "high") ex("Iron", "siron_high");
     if (L.egfr_low) ex("Magnesium", "egfr");
+    // Doctor overrides. Pinned actives take their layers first; removed actives are kept out of every stage.
+    const pinned = (opts && opts.pinned) || new Map(), removed = (opts && opts.removed) || new Set();
+    const doctor = new Map(), overridden = new Map(), bumped = [];
+    for (const a of removed) if (!pinned.has(a) && !excl.has(a)) excl.set(a, "doctor");
+    for (const [a, n] of pinned) { if (excl.has(a)) { overridden.set(a, excl.get(a)); excl.delete(a); } layers.set(a, n); doctor.set(a, n); }
+    const s1 = new Map(), s1why = new Map();
+    const s1set = (a, n, why) => { if (layers.has(a)) return; s1.set(a, n); s1why.set(a, why); };
     const cap1 = L.ca_high || L.egfr_low;
     if (!excl.has("Vitamin B12")) {
-      if (L.b12 === "def") { layers.set("Vitamin B12", cap1 ? 1 : 2); stage1.set("Vitamin B12", "b12_def"); }
-      else if (L.b12 === "border" && !c.Q25.includes("B12")) { layers.set("Vitamin B12", 1); stage1.set("Vitamin B12", "b12_border"); }
+      if (L.b12 === "def") s1set("Vitamin B12", cap1 ? 1 : 2, "b12_def");
+      else if (L.b12 === "border" && !c.Q25.includes("B12")) s1set("Vitamin B12", 1, "b12_border");
     }
     if (!excl.has("Vitamin D3")) {
-      if (L.vitD === "def") { layers.set("Vitamin D3", cap1 ? 1 : 2); stage1.set("Vitamin D3", "vitd_def"); }
-      else if (L.vitD === "insuf" && !c.Q25.includes("Vitamin D")) { layers.set("Vitamin D3", 1); stage1.set("Vitamin D3", "vitd_insuf"); }
+      if (L.vitD === "def") s1set("Vitamin D3", cap1 ? 1 : 2, "vitd_def");
+      else if (L.vitD === "insuf" && !c.Q25.includes("Vitamin D")) s1set("Vitamin D3", 1, "vitd_insuf");
     }
-    if (PREG.has(c.Q24) && !excl.has("Vitamin B9")) { layers.set("Vitamin B9", 1); stage1.set("Vitamin B9", "pregnancy"); }
+    if (PREG.has(c.Q24) && !excl.has("Vitamin B9")) s1set("Vitamin B9", 1, "pregnancy");
     if (!excl.has("Iron") && !c.Q25.includes("Iron")) {
       let routeA = L.anaemic || L.siron === "low" || (L.mcv_low && L.siron == null);
       if (L.siron === "ok") routeA = L.anaemic;
@@ -292,7 +317,18 @@ function makeEngine(DATA) {
       if (c.Q9 === 3) armed++;
       if (c.Q20.includes(0)) armed++;
       const routeB = (c.sex === "Female" && c.periods && armed >= 2 && L.siron !== "ok");
-      if (routeA || routeB) { layers.set("Iron", 1); stage1.set("Iron", routeA ? (L.anaemic ? "hb_low" : (L.siron === "low" ? "siron_low" : "mcv_low")) : "iron_quiz"); }
+      if (routeA || routeB) s1set("Iron", 1, routeA ? (L.anaemic ? "hb_low" : (L.siron === "low" ? "siron_low" : "mcv_low")) : "iron_quiz");
+    }
+    // Fit the blood-led layers into what the doctor has left, in priority order B12, D3, folic acid, iron.
+    {
+      let u = 0, d = 0; for (const [, n] of layers) { u += n; if (n === 2) d++; }
+      for (const [a, want] of s1) {
+        let n = want; if (n === 2 && d >= 2) n = 1;
+        if (u + n > 7) n = 7 - u;
+        if (n <= 0) { bumped.push(a); continue; }
+        if (n < want) bumped.push(a + ":1");
+        layers.set(a, n); stage1.set(a, s1why.get(a)); u += n; if (n === 2) d++;
+      }
     }
     const trace = {};
     const q = quizPoints(c, trace), lb = labPoints(c, trace);
@@ -320,8 +356,8 @@ function makeEngine(DATA) {
       layers.set(a, need); used += need; if (need === 2) doubles++;
     }
     if (used < 7) for (const a of order) { if (used >= 7) break; if (layers.has(a)) continue; layers.set(a, 1); used++; }
-    if (used < 7) for (const a of ACTIVES) { if (used >= 7) break; if (layers.has(a) || excl.has(a)) continue; layers.set(a, 1); used++; }
-    return { layers, excl, stage1, scores, trace, zeroed };
+    if (used < 7) for (const a of ACTIVES) { if (used >= 7) break; if (layers.has(a) || excl.has(a) || a === "Iron") continue; layers.set(a, 1); used++; }
+    return { layers, excl, stage1, scores, trace, zeroed, doctor, overridden, bumped };
   }
   return { buildStack, quizPoints, labPoints };
 }
@@ -409,6 +445,11 @@ const PATIENTS = [
 const NAMES = ["Arjun Mehta","Lakshmi Rao","Vikram Nair","Rohan Das","Priya Reddy"];
 const loadPatient = i => Object.assign(PATIENTS[i][2](), {name:NAMES[i], batch:""});
 let P = loadPatient(0), current = 0;
+// Doctor overrides for the patient on screen. Cleared when a different patient is picked.
+let OV = {pinned:new Map(), removed:new Set()};
+let DRAFT = {a:"", n:1, why:""};
+const resetOV = () => { OV = {pinned:new Map(), removed:new Set()}; DRAFT = {a:"", n:1, why:""}; };
+const ovOpts = () => ({pinned:new Map([...OV.pinned].map(([a,v])=>[a,v.n])), removed:OV.removed});
 
 function toCustomer(p){
   return {age:p.age, sex:p.sex, periods:p.sex==="Female" && !!p.periods, Q24:p.sex==="Female"?p.Q24:"No",
@@ -422,7 +463,7 @@ const el = (t, a={}, ...k) => { const e=document.createElement(t); for (const n 
 
 function renderPatients(){
   const box=document.getElementById("patients"); box.textContent="";
-  PATIENTS.forEach((pt,i)=>box.append(el("button",{type:"button","aria-pressed":String(i===current),onclick:()=>{current=i;P=loadPatient(i);renderPatients();renderInputs();update();}}, pt[0], el("small",{},pt[1]))));
+  PATIENTS.forEach((pt,i)=>box.append(el("button",{type:"button","aria-pressed":String(i===current),onclick:()=>{current=i;P=loadPatient(i);resetOV();renderPatients();renderInputs();update();}}, pt[0], el("small",{},pt[1]))));
 }
 function optButtons(q, opts, isOn, toggle){
   const box=el("div",{class:"opts"});
@@ -510,32 +551,112 @@ function patientLines(p, r){
   if(p.Q20.length) quiz.push("you want "+p.Q20.map(i=>QO.Q20[i].toLowerCase()).join(", and "));
   return lab.concat(quiz).slice(0,3);
 }
+// ---------- doctor override ----------
+const PINWHY = "Added by the doctor";
+function pinLimits(a){
+  // Printing limits that hold whoever chooses: iron one layer (two would pass the 40 mg Indian upper limit), magnesium always two, at most two doubled slots.
+  if (a==="Iron") return [1];
+  if (a==="Magnesium") return [2];
+  return [1,2];
+}
+function pinnedUse(except){ let u=0,d=0; for(const [a,v] of OV.pinned){ if(a===except) continue; u+=v.n; if(v.n===2) d++; } return {u,d}; }
+function doctorBox(r){
+  const box=el("div",{class:"sect docbox"});
+  box.append(el("h3",{},"Doctor's changes"));
+  box.append(el("p",{class:"hint"},"Take out any suggested layer with Remove, or add an active of your own below. Your choices take their layers first and the engine refills the rest around them."));
+  // add form
+  const {u,d}=pinnedUse();
+  const opts=DATA.ACTIVES.filter(a=>!OV.pinned.has(a));
+  if(DRAFT.a && !opts.includes(DRAFT.a)) DRAFT.a="";
+  const sel=el("select",{id:"doc-active","aria-label":"Active to add"}, el("option",{value:""},"Choose an active"));
+  for(const a of opts){
+    const tag = r.layers.has(a) ? "  (in the stack now)" : r.excl.has(a) && r.excl.get(a)!=="doctor" ? "  (engine left this out)" : "";
+    const o=el("option",{value:a},nm(a)+" · "+DOSE[a]+tag); if(a===DRAFT.a) o.selected=true; sel.append(o);
+  }
+  sel.addEventListener("change",()=>{DRAFT.a=sel.value; const lim=pinLimits(DRAFT.a||"x"); if(!lim.includes(DRAFT.n)) DRAFT.n=lim[0]; update();});
+  const lim=DRAFT.a?pinLimits(DRAFT.a):[1,2];
+  const nsel=el("select",{id:"doc-layers","aria-label":"Number of layers"});
+  for(const n of [1,2]){
+    const o=el("option",{value:String(n)},n===1?"1 layer":"2 layers");
+    if(!lim.includes(n) || (n===2 && d>=2)) o.disabled=true;
+    if(n===DRAFT.n) o.selected=true; nsel.append(o);
+  }
+  nsel.addEventListener("change",()=>{DRAFT.n=+nsel.value;});
+  const why=el("input",{type:"text",id:"doc-why",placeholder:"Reason (optional), e.g. low ferritin on outside test",value:DRAFT.why,"aria-label":"Reason for adding"});
+  why.addEventListener("input",()=>{DRAFT.why=why.value;});
+  const room=7-u;
+  let msg="";
+  if(DRAFT.a){
+    const n = (DRAFT.n===2 && d>=2) ? 1 : DRAFT.n;
+    if(n>room) msg="Your own choices already fill "+u+" of 7 layers. Remove one of them first.";
+    else if(r.excl.has(DRAFT.a) && r.excl.get(DRAFT.a)!=="doctor") msg="The engine left this out: "+EXWHY[r.excl.get(DRAFT.a)]+". You can still add it, and it will be marked as your clinical decision.";
+    else if(DRAFT.a==="Iron") msg="Iron prints at one layer only. Two layers would be 58 mg, over the 40 mg Indian upper limit.";
+    else if(DRAFT.a==="Magnesium") msg="Magnesium always prints as two layers (70 mg), the lowest dose that can carry a claim.";
+  }
+  const add=el("button",{type:"button",class:"primary",onclick:()=>{
+    if(!DRAFT.a) return; let n=(DRAFT.n===2 && pinnedUse().d>=2)?1:DRAFT.n; if(!pinLimits(DRAFT.a).includes(n)) n=pinLimits(DRAFT.a)[0];
+    if(n>7-pinnedUse().u) return;
+    OV.removed.delete(DRAFT.a); OV.pinned.set(DRAFT.a,{n,why:DRAFT.why.trim()}); DRAFT={a:"",n:1,why:""}; update();
+  }},"Add to stack");
+  if(!DRAFT.a || ((DRAFT.n===2&&d>=2)?1:DRAFT.n)>room) add.disabled=true;
+  box.append(el("div",{class:"addrow"}, sel, nsel), why, msg?el("p",{class:"warn"},msg):null, el("div",{class:"btnrow"}, add));
+  // list of changes
+  const ch=[];
+  for(const [a,v] of OV.pinned) ch.push(el("li",{}, el("span",{},"Added "+nm(a)+", "+(v.n===2?"2 layers":"1 layer")+(v.why?". "+v.why:"")+(r.overridden.has(a)?". Overrides: "+EXWHY[r.overridden.get(a)]:"")), el("button",{type:"button",class:"link",onclick:()=>{OV.pinned.delete(a);update();}},"Undo")));
+  for(const a of OV.removed) ch.push(el("li",{}, el("span",{},"Removed "+nm(a)), el("button",{type:"button",class:"link",onclick:()=>{OV.removed.delete(a);update();}},"Put back")));
+  for(const b of r.bumped){ const [a,one]=b.split(":"); ch.push(el("li",{class:"note"}, el("span",{}, one?nm(a)+" cut to one layer to make room for your choices":nm(a)+" was called for by the bloods but there was no room left after your choices"))); }
+  if(ch.length){
+    box.append(el("ul",{class:"changes"},...ch));
+    box.append(el("div",{class:"btnrow"}, el("button",{type:"button",onclick:()=>{resetOV();update();}},"Back to the engine's suggestion"), el("button",{type:"button",onclick:e=>copyStack(r,e.target)},"Copy final stack")));
+  } else {
+    box.append(el("div",{class:"btnrow"}, el("button",{type:"button",onclick:e=>copyStack(r,e.target)},"Copy final stack")));
+  }
+  return box;
+}
+function layerOrder(r){
+  const rank=a=>r.doctor.has(a)?2:r.stage1.has(a)?1:0;
+  return [...r.layers.entries()].sort((a,b)=>(rank(b[0])-rank(a[0]))||((r.scores[b[0]]||0)-(r.scores[a[0]]||0)));
+}
+function copyStack(r, btn){
+  const pt=PATIENTS[current];
+  const lines=[pt[0]+" · "+pt[1]];
+  for(const [a,n] of layerOrder(r)) lines.push("- "+nm(a)+" "+DOSE[a]+(n===2?" x 2 layers":"")+(r.doctor.has(a)?" (doctor)":r.stage1.has(a)?" (bloods)":" (questionnaire)"));
+  if(OV.removed.size) lines.push("Removed by the doctor: "+[...OV.removed].map(nm).join(", "));
+  const t=lines.join("\n");
+  const done=()=>{ btn.textContent="Copied"; setTimeout(()=>{btn.textContent="Copy final stack";},1500); };
+  try { navigator.clipboard.writeText(t).then(done,()=>window.prompt("Copy the stack:",t)); } catch(e){ window.prompt("Copy the stack:",t); }
+}
 function update(){
   if (MODE==="ready") return updateReady();
-  const c=toCustomer(P); const r=E.buildStack(c);
+  const c=toCustomer(P); const r=E.buildStack(c,ovOpts());
   const res=document.getElementById("result"); res.textContent="";
   const pt=PATIENTS[current];
-  res.append(el("h2",{},"The stack"), el("div",{class:"who"}, pt[0]+" · "+pt[1]));
+  res.append(el("h2",{},OV.pinned.size||OV.removed.size?"The stack, as changed by the doctor":"The stack"), el("div",{class:"who"}, pt[0]+" · "+pt[1]));
   const st=el("div",{class:"stack"});
-  const order=[...r.layers.entries()].sort((a,b)=>(r.stage1.has(b[0])-r.stage1.has(a[0]))||((r.scores[b[0]]||0)-(r.scores[a[0]]||0)));
-  let bloodCount=0;
-  for(const [a,n] of order){
-    const blood=r.stage1.has(a); if(blood) bloodCount+=n;
-    const why = blood ? S1WHY[r.stage1.get(a)] : topReason(a,r);
-    for(let i=0;i<n;i++) st.append(el("div",{class:"layer "+(blood?"blood":"score")}, el("div",{}, el("b",{},nm(a)+(n===2?(i===0?"  ·  layer 1 of 2":"  ·  layer 2 of 2"):"")), i===0?el("span",{},why):null), el("div",{class:"dose"},DOSE[a])));
+  let bloodCount=0, docCount=0;
+  for(const [a,n] of layerOrder(r)){
+    const doc=r.doctor.has(a), blood=!doc && r.stage1.has(a);
+    if(blood) bloodCount+=n; if(doc) docCount+=n;
+    const why = doc ? (OV.pinned.get(a).why || PINWHY) + (r.overridden.has(a)?". Engine had left it out: "+EXWHY[r.overridden.get(a)]:"") : blood ? S1WHY[r.stage1.get(a)] : topReason(a,r);
+    const cls = doc ? "doc" : blood ? "blood" : "score";
+    for(let i=0;i<n;i++){
+      const rm = i===0 ? el("button",{type:"button",class:"rm","aria-label":"Remove "+nm(a),title:"Remove "+nm(a),onclick:()=>{ if(doc) OV.pinned.delete(a); else OV.removed.add(a); update(); }},"Remove") : el("span");
+      st.append(el("div",{class:"layer "+cls}, el("div",{}, el("b",{},nm(a)+(n===2?(i===0?"  ·  layer 1 of 2":"  ·  layer 2 of 2"):"")), i===0?el("span",{},why):null), el("div",{class:"dose"},DOSE[a]), rm));
+    }
   }
   res.append(st);
-  res.append(el("div",{class:"key"}, el("span",{},el("i",{style:"background:var(--blood)"}),"Settled by the bloods"), el("span",{},el("i",{style:"background:var(--score)"}),"Chosen from the answers")));
-  res.append(el("div",{class:"sect"}, el("span",{class:"count"},String(bloodCount)), el("span",{}," of 7 layers settled by the bloods before the questionnaire was read")));
+  res.append(el("div",{class:"key"}, el("span",{},el("i",{style:"background:var(--blood)"}),"Settled by the bloods"), el("span",{},el("i",{style:"background:var(--score)"}),"Chosen from the answers"), el("span",{},el("i",{class:"dockey"}),"Doctor's choice")));
+  res.append(el("div",{class:"sect"}, el("span",{class:"count"},String(bloodCount)), el("span",{}," of 7 layers settled by the bloods"+(docCount?", and "+docCount+" chosen by the doctor,":"")+" before the questionnaire was read")));
+  res.append(doctorBox(r));
   const left=[];
-  for(const [a,w] of r.excl) left.push(nm(a)+": "+EXWHY[w]);
-  for(const a of r.zeroed) left.push(nm(a)+": measured in range, so the questionnaire's points for it were set to zero");
+  for(const [a,w] of r.excl) if(w!=="doctor") left.push(nm(a)+": "+EXWHY[w]);
+  for(const a of r.zeroed) if(!r.layers.has(a)) left.push(nm(a)+": measured in range, so the questionnaire's points for it were set to zero");
   if(c.lab.siron==="ok" && c.lab.mcv_low && !r.layers.has("Iron")) left.push("Iron: small red cells, but serum iron was measured in range, so the iron route stays closed");
   for(const k of c.Q25) left.push(clean(k)+": already taken daily");
-  res.append(el("div",{class:"sect"}, el("h3",{},"Left out, and why"), left.length?el("ul",{},...left.map(t=>el("li",{},t))):el("p",{style:"margin:0;font-size:13px"},"Nothing measured argued against its own layer.")));
+  res.append(el("div",{class:"sect"}, el("h3",{},"Left out by the engine, and why"), left.length?el("ul",{},...left.map(t=>el("li",{},t))):el("p",{style:"margin:0;font-size:13px"},"Nothing measured argued against its own layer.")));
   const fl=doctorFlags(P);
   res.append(el("div",{class:"sect doctor"}, el("h3",{},"For the doctor, never met with a supplement"), fl.length?el("ul",{},...fl.map(t=>el("li",{},t))):el("p",{style:"margin:0;font-size:13px"},"No flags on this panel.")));
-  const pl=patientLines(P,r);
+  const pl=patientLines(P,r).filter(t=>!(OV.removed.has("Vitamin D3")&&/vitamin D/.test(t))&&!(OV.removed.has("Vitamin B12")&&/B12 running low/.test(t)));
   if(pl.length) res.append(el("div",{class:"sect reads"}, el("h3",{},"What the patient reads"), ...pl.map(t=>el("p",{},"“"+t+"”"))));
   res.append(printBlock());
 }
@@ -642,6 +763,7 @@ const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":
 const lc = s => { s = clean(s); s = s.charAt(0).toLowerCase() + s.slice(1); return s.replace(/^i /,"I ").replace(/^i'/,"I'").replace(/ i /g," I "); };
 function times(str, n){ const m = String(str).match(/^([\d.]+)\s*(.*)$/); if (!m || n === 1) return str; return (Math.round(+m[1]*n*10)/10) + " " + m[2]; }
 function sheetWhy(a, r){
+  if (r.doctor && r.doctor.has(a)) return "Added by your doctor";
   if (r.stage1.has(a)) return r.stage1.get(a) === "pregnancy" ? "Included for pregnancy, breastfeeding or planning" : "Chosen with your doctor from your recent check-up";
   const t = (r.trace[a] || []).slice().sort((x,y) => y.pts - x.pts)[0];
   if (!t) return "Completes your seven layers";
@@ -663,9 +785,8 @@ function sheetData(){
     }
     return {rows, stack:s.name, ready:true};
   }
-  const r = E.buildStack(c);
-  const order = [...r.layers.entries()].sort((a,b) => (r.stage1.has(b[0]) - r.stage1.has(a[0])) || ((r.scores[b[0]]||0) - (r.scores[a[0]]||0)));
-  for (const [a,n] of order) rows.push({k:a, n, dose:times(DOSE[a], n), why:sheetWhy(a, r)});
+  const r = E.buildStack(c, ovOpts());
+  for (const [a,n] of layerOrder(r)) rows.push({k:a, n, dose:times(DOSE[a], n), why:sheetWhy(a, r)});
   return {rows, stack:"Personalised from your check-up", ready:false};
 }
 function stackRef(rows){
@@ -758,7 +879,7 @@ function printBlock(){
 function setMode(m){
   MODE=m; document.getElementById("m-build").setAttribute("aria-pressed",String(m==="build")); document.getElementById("m-ready").setAttribute("aria-pressed",String(m==="ready"));
   document.querySelector("h1").textContent = m==="ready" ? "Pick a ready-made stack, and check it against the patient" : "Pick a patient, and watch the stack build";
-  document.querySelector(".stand").textContent = m==="ready" ? "One click loads a stack built for a specialty. The patient's safety rules and bloods are applied before it prints, and anything that changes is shown with its reason." : "Change any blood result or answer and the seven layers rebuild at once. Navy layers come from the bloods. Orange layers come from the questionnaire.";
+  document.querySelector(".stand").textContent = m==="ready" ? "One click loads a stack built for a specialty. The patient's safety rules and bloods are applied before it prints, and anything that changes is shown with its reason." : "Change any blood result or answer and the seven layers rebuild at once. Navy layers come from the bloods. Orange layers come from the questionnaire. The doctor can remove any layer or add their own, and the rest rebuilds around their choice.";
   renderReady(); renderInputs(); update();
 }
 document.getElementById("m-build").addEventListener("click",()=>setMode("build"));
